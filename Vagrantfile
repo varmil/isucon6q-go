@@ -43,6 +43,8 @@ Vagrant.configure("2") do |config|
   # argument is a set of non-required options.
   # config.vm.synced_folder "../data", "/vagrant_data"
   config.vm.synced_folder "./", "/home/isucon/webapp/go/", type: "rsync",
+    owner: "isucon",
+    group: "isucon",
     rsync__args: ["-a", "--include=*.go", "--exclude=*"]
 
   # Provider-specific configuration so you can fine-tune various
