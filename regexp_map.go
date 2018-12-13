@@ -38,6 +38,9 @@ func (s *SortedSet) Store(keyword string) {
 func (s *SortedSet) LoadAllSortedWords() *[]*string {
 	var result []*string
 
+	s.mx.RLock()
+	defer s.mx.RUnlock()
+
 	nodes := s.r.GetByRankRange(-1, 1, false)
 	for _, foo := range nodes {
 		bar := foo.Key()

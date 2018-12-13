@@ -8,11 +8,11 @@ deps:
 	go get github.com/unrolled/render
 
 isuda: deps
-	go build -o isuda isuda.go type.go util.go
+	go build -o isuda isuda.go type.go util.go match_map.go regexp_map.go
 	sudo systemctl restart isuda.go.service
 
 isutar: deps
-	go build -o isutar isutar.go type.go util.go
+	go build -o isutar isutar.go type.go util.go match_map.go regexp_map.go
 	sudo systemctl restart isutar.go.service
 
 .PHONY: all deps

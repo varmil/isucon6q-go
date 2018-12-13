@@ -342,12 +342,11 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int) st
 		return ""
 	}
 
+	start := time.Now()
+
 	// ORDER BY CHARACTER_LENGTH(keyword) DESC
 	sorted := glober.LoadAllSortedWords()
 	// log.Printf("%v", sorted)
-
-	elapsed := time.Since(start)
-	log.Printf("Binomial took %s", elapsed)
 
 	kw2sha := make(map[string]string)
 
@@ -356,8 +355,6 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int) st
 		var ok bool
 		kw := *keyword
 		key := strconv.Itoa(eid) + kw
-
-		start := time.Now()
 
 		if isMatch, ok = syncMatchMap.Load(key); ok {
 			// log.Printf("CONTENTHASH CACHE HIT!")
@@ -373,6 +370,9 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int) st
 			content = strings.Replace(content, kw, kw2sha[kw], -1)
 		}
 	}
+
+	elapsed := time.Since(start)
+	log.Printf("Binomial took %s", elapsed)
 
 	for kw, hash := range kw2sha {
 		u, err := r.URL.Parse(baseUrl.String() + "/keyword/" + pathURIEscape(kw))
