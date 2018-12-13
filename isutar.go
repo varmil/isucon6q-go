@@ -124,5 +124,6 @@ func main() {
 	s.Methods("GET").HandlerFunc(myHandler(starsHandler))
 	s.Methods("POST").HandlerFunc(myHandler(starsPostHandler))
 
+	// log.Fatal(http.ListenAndServe(":5001", handlers.LoggingHandler(os.Stdout, r)))
 	log.Fatal(http.ListenAndServe(":5001", r))
 }

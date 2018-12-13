@@ -13,6 +13,11 @@ type SyncMap struct {
 	r cmap.ConcurrentMap
 }
 
+type KeywordGlobTuple struct {
+	keyword string
+	glob    glob.Glob
+}
+
 // NewSyncMap returns the instance
 func NewSyncMap() *SyncMap {
 	return &SyncMap{r: cmap.New()}
@@ -38,14 +43,17 @@ func (s *SyncMap) Has(keyword string) bool {
 }
 
 // LoadAll the instances, return nil if not exists
-func (s *SyncMap) LoadAllSortedWords() []string {
-	var result []string
+func (s *SyncMap) LoadAllSortedWords() []*KeywordGlobTuple {
+	var result []*KeywordGlobTuple
 
-	for word := range s.r.Items() {
-		result = append(result, word)
+	for word, g := range s.r.Items() {
+		result = append(result, &KeywordGlobTuple{
+			keyword: word,
+			glob:    g.(glob.Glob),
+		})
 	}
 	sort.Slice(result, func(i, j int) bool {
-		return len(result[i]) > len(result[j])
+		return len(result[i].keyword) > len(result[j].keyword)
 	})
 
 	return result

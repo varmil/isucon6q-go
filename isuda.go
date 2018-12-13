@@ -1,3 +1,10 @@
+/**
+ * nginx で js/ css/ を返却 (???)
+ * use the cmap for keywords cache (7500 unstable)
+ * htmlify/ : Tupleを使うようにした (14400)
+ * nginx    : favicon/ imgz/ を返却 (14400)
+ */
+
 package main
 
 import (
@@ -176,7 +183,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// use lock ?
+	// use cmap
 	glober.Store(keyword, glob.MustCompile("*"+keyword+"*"))
 
 	_, err := db.Exec(`
@@ -331,37 +338,20 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	if content == "" {
 		return ""
 	}
-	// rows, err := db.Query(`
-	// 	SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
-	// `)
-	// panicIf(err)
-	// entries := make([]*Entry, 0, 500)
-	// for rows.Next() {
-	// 	e := Entry{}
-	// 	err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
-	// 	panicIf(err)
-	// 	entries = append(entries, &e)
-	// }
-	// rows.Close()
-
-	// keywords := make([]string, 0, 500)
-	// for _, entry := range entries {
-	// 	// keywords = append(keywords, glob.QuoteMeta(entry.Keyword))
-	// 	keywords = append(keywords, entry.Keyword)
-	// }
 
 	start := time.Now()
 
 	// ORDER BY CHARACTER_LENGTH(keyword) DESC
-	sortedSlice := glober.LoadAllSortedWords()
+	sorted := glober.LoadAllSortedWords()
 	// log.Printf("%v", sortedSlice)
 
 	kw2sha := make(map[string]string)
-	for _, word := range sortedSlice {
-		if glober.Has(word) {
+	for _, tuple := range sorted {
+		if tuple.glob.Match(content) {
 			// log.Printf("HIT the word: %v", word)
-			kw2sha[word] = "__" + fmt.Sprintf("%x", sha1.Sum([]byte(word)))
-			content = strings.Replace(content, word, kw2sha[word], -1)
+			kw := tuple.keyword
+			kw2sha[kw] = "__" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
+			content = strings.Replace(content, kw, kw2sha[kw], -1)
 		}
 	}
 
