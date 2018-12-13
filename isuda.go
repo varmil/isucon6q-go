@@ -53,7 +53,8 @@ var (
 
 	errInvalidUser = errors.New("Invalid User")
 
-	glober *SyncMap
+	glober       *SyncMap
+	syncMatchMap *SyncMatchMap
 )
 
 func setName(w http.ResponseWriter, r *http.Request) error {
@@ -87,14 +88,14 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	_, err := db.Exec(`DELETE FROM entry WHERE id > 7101`)
 	panicIf(err)
 
-	// TODO: initialize
-	{
-		initRegexp()
-	}
-
 	resp, err := http.Get(fmt.Sprintf("%s/initialize", isutarEndpoint))
 	panicIf(err)
 	defer resp.Body.Close()
+
+	// initialize regexp
+	{
+		initRegexp()
+	}
 
 	re.JSON(w, http.StatusOK, map[string]string{"result": "ok"})
 }
@@ -184,7 +185,10 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// use cmap
-	glober.Store(keyword, glob.MustCompile("*"+keyword+"*"))
+	{
+		r := glob.MustCompile("*" + keyword + "*")
+		glober.Store(keyword, &r)
+	}
 
 	_, err := db.Exec(`
 		INSERT INTO entry (author_id, keyword, description, created_at, updated_at)
@@ -334,6 +338,7 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+// TODO: tuning
 func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	if content == "" {
 		return ""
@@ -345,10 +350,26 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	sorted := glober.LoadAllSortedWords()
 	// log.Printf("%v", sortedSlice)
 
+	elapsed := time.Since(start)
+	log.Printf("Binomial took %s", elapsed)
+
 	kw2sha := make(map[string]string)
+	contentHash := fmt.Sprintf("%x", sha1.Sum([]byte(content)))
+
 	for _, tuple := range sorted {
-		if tuple.glob.Match(content) {
-			// log.Printf("HIT the word: %v", word)
+		var isMatch bool
+		var ok bool
+		key := tuple.keyword + contentHash
+
+		if isMatch, ok = syncMatchMap.Load(key); ok {
+			// log.Printf("CONTENTHASH CACHE HIT!")
+		} else {
+			isMatch = (*tuple.glob).Match(content)
+			syncMatchMap.Store(key, isMatch)
+		}
+
+		if isMatch {
+			// log.Printf("HIT the word: %v", tuple.keyword)
 			kw := tuple.keyword
 			kw2sha[kw] = "__" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
 			content = strings.Replace(content, kw, kw2sha[kw], -1)
@@ -361,9 +382,6 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 		link := fmt.Sprintf("<a href=\"%s\">%s</a>", u, html.EscapeString(kw))
 		content = strings.Replace(content, hash, link, -1)
 	}
-
-	elapsed := time.Since(start)
-	log.Printf("Binomial took %s", elapsed)
 
 	// kw2sha := make(map[string]string)
 	// re := regexp.MustCompile("(" + strings.Join(keywords, "|") + ")")
@@ -431,7 +449,11 @@ func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
 }
 
 func initRegexp() {
+	glober = nil
+	syncMatchMap = nil
+
 	glober = NewSyncMap()
+	syncMatchMap = NewSyncMatchMap()
 
 	rows, err := db.Query(`
 		SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
@@ -447,7 +469,8 @@ func initRegexp() {
 	rows.Close()
 
 	for _, entry := range entries {
-		glober.Store(entry.Keyword, glob.MustCompile("*"+entry.Keyword+"*"))
+		r := glob.MustCompile("*" + entry.Keyword + "*")
+		glober.Store(entry.Keyword, &r)
 	}
 }
 

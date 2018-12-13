@@ -61,7 +61,7 @@ func starsPostHandler(w http.ResponseWriter, r *http.Request) {
 	u, err := r.URL.Parse(fmt.Sprintf("%s/keyword/%s", origin, pathURIEscape(keyword)))
 	panicIf(err)
 
-	log.Printf("### starsPostHandler ### %v", u.String())
+	// log.Printf("### starsPostHandler ### %v", u.String())
 	resp, err := http.Get(u.String())
 	panicIf(err)
 
