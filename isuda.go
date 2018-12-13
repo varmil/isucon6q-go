@@ -14,15 +14,20 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 	"github.com/unrolled/render"
+
+	_ "net/http/pprof"
+
+	"github.com/gobwas/glob"
 )
 
 const (
@@ -40,6 +45,8 @@ var (
 	store   *sessions.CookieStore
 
 	errInvalidUser = errors.New("Invalid User")
+
+	glober *SyncMap
 )
 
 func setName(w http.ResponseWriter, r *http.Request) error {
@@ -72,6 +79,11 @@ func authenticate(w http.ResponseWriter, r *http.Request) error {
 func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	_, err := db.Exec(`DELETE FROM entry WHERE id > 7101`)
 	panicIf(err)
+
+	// TODO: initialize
+	{
+		initRegexp()
+	}
 
 	resp, err := http.Get(fmt.Sprintf("%s/initialize", isutarEndpoint))
 	panicIf(err)
@@ -163,6 +175,10 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SPAM!", http.StatusBadRequest)
 		return
 	}
+
+	// use lock ?
+	glober.Store(keyword, glob.MustCompile("*"+keyword+"*"))
+
 	_, err := db.Exec(`
 		INSERT INTO entry (author_id, keyword, description, created_at, updated_at)
 		VALUES (?, ?, ?, NOW(), NOW())
@@ -302,6 +318,10 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
+
+	// use cmap
+	glober.Delete(keyword)
+
 	_, err = db.Exec(`DELETE FROM entry WHERE keyword = ?`, keyword)
 	panicIf(err)
 	http.Redirect(w, r, "/", http.StatusFound)
@@ -311,36 +331,64 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
 	if content == "" {
 		return ""
 	}
-	rows, err := db.Query(`
-		SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
-	`)
-	panicIf(err)
-	entries := make([]*Entry, 0, 500)
-	for rows.Next() {
-		e := Entry{}
-		err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
-		panicIf(err)
-		entries = append(entries, &e)
-	}
-	rows.Close()
+	// rows, err := db.Query(`
+	// 	SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
+	// `)
+	// panicIf(err)
+	// entries := make([]*Entry, 0, 500)
+	// for rows.Next() {
+	// 	e := Entry{}
+	// 	err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
+	// 	panicIf(err)
+	// 	entries = append(entries, &e)
+	// }
+	// rows.Close()
 
-	keywords := make([]string, 0, 500)
-	for _, entry := range entries {
-		keywords = append(keywords, regexp.QuoteMeta(entry.Keyword))
-	}
-	re := regexp.MustCompile("(" + strings.Join(keywords, "|") + ")")
+	// keywords := make([]string, 0, 500)
+	// for _, entry := range entries {
+	// 	// keywords = append(keywords, glob.QuoteMeta(entry.Keyword))
+	// 	keywords = append(keywords, entry.Keyword)
+	// }
+
+	start := time.Now()
+
+	// ORDER BY CHARACTER_LENGTH(keyword) DESC
+	sortedSlice := glober.LoadAllSortedWords()
+	// log.Printf("%v", sortedSlice)
+
 	kw2sha := make(map[string]string)
-	content = re.ReplaceAllStringFunc(content, func(kw string) string {
-		kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
-		return kw2sha[kw]
-	})
-	content = html.EscapeString(content)
+	for _, word := range sortedSlice {
+		if glober.Has(word) {
+			// log.Printf("HIT the word: %v", word)
+			kw2sha[word] = "__" + fmt.Sprintf("%x", sha1.Sum([]byte(word)))
+			content = strings.Replace(content, word, kw2sha[word], -1)
+		}
+	}
+
 	for kw, hash := range kw2sha {
 		u, err := r.URL.Parse(baseUrl.String() + "/keyword/" + pathURIEscape(kw))
 		panicIf(err)
 		link := fmt.Sprintf("<a href=\"%s\">%s</a>", u, html.EscapeString(kw))
 		content = strings.Replace(content, hash, link, -1)
 	}
+
+	elapsed := time.Since(start)
+	log.Printf("Binomial took %s", elapsed)
+
+	// kw2sha := make(map[string]string)
+	// re := regexp.MustCompile("(" + strings.Join(keywords, "|") + ")")
+	// content = re.ReplaceAllStringFunc(content, func(kw string) string {
+	// 	kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
+	// 	return kw2sha[kw]
+	// })
+	// content = html.EscapeString(content)
+	// for kw, hash := range kw2sha {
+	// 	u, err := r.URL.Parse(baseUrl.String() + "/keyword/" + pathURIEscape(kw))
+	// 	panicIf(err)
+	// 	link := fmt.Sprintf("<a href=\"%s\">%s</a>", u, html.EscapeString(kw))
+	// 	content = strings.Replace(content, hash, link, -1)
+	// }
+
 	return strings.Replace(content, "\n", "<br />\n", -1)
 }
 
@@ -392,7 +440,32 @@ func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
 	return session
 }
 
+func initRegexp() {
+	glober = NewSyncMap()
+
+	rows, err := db.Query(`
+		SELECT * FROM entry ORDER BY CHARACTER_LENGTH(keyword) DESC
+	`)
+	panicIf(err)
+	entries := make([]*Entry, 0, 500)
+	for rows.Next() {
+		e := Entry{}
+		err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
+		panicIf(err)
+		entries = append(entries, &e)
+	}
+	rows.Close()
+
+	for _, entry := range entries {
+		glober.Store(entry.Keyword, glob.MustCompile("*"+entry.Keyword+"*"))
+	}
+}
+
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
+
 	host := os.Getenv("ISUDA_DB_HOST")
 	if host == "" {
 		host = "localhost"
@@ -432,6 +505,11 @@ func main() {
 	isupamEndpoint = os.Getenv("ISUPAM_ORIGIN")
 	if isupamEndpoint == "" {
 		isupamEndpoint = "http://localhost:5050"
+	}
+
+	// TODO: init regexp
+	{
+		initRegexp()
 	}
 
 	store = sessions.NewCookieStore([]byte(sessionSecret))
@@ -479,5 +557,5 @@ func main() {
 	k.Methods("POST").HandlerFunc(myHandler(keywordByKeywordDeleteHandler))
 
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./public/")))
-	log.Fatal(http.ListenAndServe(":5000", r))
+	log.Fatal(http.ListenAndServe(":5000", handlers.LoggingHandler(os.Stdout, r)))
 }

@@ -12,6 +12,8 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
+
+	_ "net/http/pprof"
 )
 
 var (
@@ -55,10 +57,14 @@ func starsPostHandler(w http.ResponseWriter, r *http.Request) {
 	if origin == "" {
 		origin = "http://localhost:5000"
 	}
+
 	u, err := r.URL.Parse(fmt.Sprintf("%s/keyword/%s", origin, pathURIEscape(keyword)))
 	panicIf(err)
+
+	log.Printf("### starsPostHandler ### %v", u.String())
 	resp, err := http.Get(u.String())
 	panicIf(err)
+
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		notFound(w)
@@ -73,6 +79,11 @@ func starsPostHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
+	go func() {
+		log.Println(http.ListenAndServe(":6061", nil))
+	}()
+
 	host := os.Getenv("ISUTAR_DB_HOST")
 	if host == "" {
 		host = "localhost"
