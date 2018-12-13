@@ -41,8 +41,7 @@ func (s *SortedSet) LoadAllSortedWords() *[]*string {
 	s.mx.RLock()
 	defer s.mx.RUnlock()
 
-	nodes := s.r.GetByRankRange(-1, 1, false)
-	for _, foo := range nodes {
+	for _, foo := range s.r.GetByRankRange(-1, 1, false) {
 		bar := foo.Key()
 		result = append(result, &bar)
 	}

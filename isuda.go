@@ -3,6 +3,7 @@
  * use the cmap for keywords cache (7500 unstable)
  * htmlify/ : Tupleを使うようにした (14400)
  * nginx    : favicon/ imgz/ を返却 (14400)
+ * htmlify/ : sortedを引数で渡すようにした (41400)
  */
 
 package main
@@ -118,12 +119,15 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil && err != sql.ErrNoRows {
 		panicIf(err)
 	}
+
 	entries := make([]*Entry, 0, 10)
+	sorted := glober.LoadAllSortedWords()
+
 	for rows.Next() {
 		e := Entry{}
 		err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
 		panicIf(err)
-		e.Html = htmlify(w, r, e.Description, e.ID)
+		e.Html = htmlify(w, r, e.Description, e.ID, sorted)
 		e.Stars = loadStars(e.Keyword)
 		entries = append(entries, &e)
 	}
@@ -290,7 +294,8 @@ func keywordByKeywordHandler(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
-	e.Html = htmlify(w, r, e.Description, e.ID)
+	sorted := glober.LoadAllSortedWords()
+	e.Html = htmlify(w, r, e.Description, e.ID, sorted)
 	e.Stars = loadStars(e.Keyword)
 
 	re.HTML(w, http.StatusOK, "keyword", struct {
@@ -337,16 +342,12 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // TODO: tuning
-func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int) string {
+func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, sorted *[]*string) string {
 	if content == "" {
 		return ""
 	}
 
 	start := time.Now()
-
-	// ORDER BY CHARACTER_LENGTH(keyword) DESC
-	sorted := glober.LoadAllSortedWords()
-	// log.Printf("%v", sorted)
 
 	kw2sha := make(map[string]string)
 
