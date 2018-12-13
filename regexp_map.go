@@ -1,86 +1,60 @@
 package main
 
 import (
-	"sort"
 	"strconv"
+	"sync"
 
-	"github.com/gobwas/glob"
-	cmap "github.com/orcaman/concurrent-map"
+	"github.com/wangjia184/sortedset"
 )
 
-// SyncMap contains cmap, the cmap has pointer of reservation as value
-type SyncMap struct {
-	r cmap.ConcurrentMap
+// SortedSet contains cmap, the cmap has pointer of reservation as value
+type SortedSet struct {
+	mx *sync.RWMutex
+	r  *sortedset.SortedSet
 }
 
-type KeywordGlobTuple struct {
-	keyword string
-	glob    *glob.Glob
-}
-
-// type keywordsSyncSlice struct {
-// 	mx   *sync.RWMutex
-// 	data []string
-// }
-
-// var keywordsCache keywordsSyncSlice
-
-// NewSyncMap returns the instance
-func NewSyncMap() *SyncMap {
-	// keywordsCache = keywordsSyncSlice{mx: &sync.RWMutex{}}
-	return &SyncMap{r: cmap.New()}
+// NewSortedSet returns the instance
+func NewSortedSet() *SortedSet {
+	return &SortedSet{mx: &sync.RWMutex{}, r: sortedset.New()}
 }
 
 // Store the instance
-func (s *SyncMap) Store(keyword string, value *glob.Glob) {
-	s.r.Set(keyword, value)
-
-	// keywordsCache.mx.Lock()
-	// keywordsCache.data = append(keywordsCache.data, keyword)
-	// keywordsCache.mx.Unlock()
+func (s *SortedSet) Store(keyword string) {
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	s.r.AddOrUpdate(keyword, sortedset.SCORE(len(keyword)), true)
 }
 
 // Load the instance, return nil if not exists
-func (s *SyncMap) Load(keyword string) (*glob.Glob, bool) {
-	t, ok := s.r.Get(keyword)
-	if !ok {
-		return nil, false
-	}
-	return t.(*glob.Glob), true
-}
-
-// Has checks if the key exists or not
-func (s *SyncMap) Has(keyword string) bool {
-	return s.r.Has(keyword)
-}
+// func (s *SortedSet) Load(keyword string) (*glob.Glob, bool) {
+// 	t, ok := s.r.GetData(toInt64(keyword))
+// 	if !ok {
+// 		return nil, false
+// 	}
+// 	return t.(*glob.Glob), true
+// }
 
 // LoadAllSortedWords the instances
-func (s *SyncMap) LoadAllSortedWords() []*KeywordGlobTuple {
-	var result []*KeywordGlobTuple
+func (s *SortedSet) LoadAllSortedWords() *[]*string {
+	var result []*string
 
-	for word, regexp := range s.r.Items() {
-		result = append(result, &KeywordGlobTuple{
-			keyword: word,
-			glob:    regexp.(*glob.Glob),
-		})
+	nodes := s.r.GetByRankRange(-1, 1, false)
+	for _, foo := range nodes {
+		bar := foo.Key()
+		result = append(result, &bar)
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		return len(result[i].keyword) > len(result[j].keyword)
-	})
-
-	return result
+	return &result
 }
 
 // Delete the instance
-func (s *SyncMap) Delete(keyword string) {
+func (s *SortedSet) Delete(keyword string) {
+	s.mx.Lock()
+	defer s.mx.Unlock()
 	s.r.Remove(keyword)
-
-	// keywordsCache.mx.Lock()
-	// keywordsCache.data = append(keywordsCache.data, keyword)
-	// keywordsCache.mx.Unlock()
 }
 
-func toString(n int64) string {
-	return strconv.FormatInt(n, 10)
+func toInt64(s string) int64 {
+	r, _ := strconv.ParseInt(s, 10, 64)
+	return r
 }

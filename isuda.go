@@ -33,8 +33,6 @@ import (
 	"github.com/unrolled/render"
 
 	_ "net/http/pprof"
-
-	"github.com/gobwas/glob"
 )
 
 const (
@@ -53,7 +51,7 @@ var (
 
 	errInvalidUser = errors.New("Invalid User")
 
-	glober       *SyncMap
+	glober       *SortedSet
 	syncMatchMap *SyncMatchMap
 )
 
@@ -125,7 +123,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 		e := Entry{}
 		err := rows.Scan(&e.ID, &e.AuthorID, &e.Keyword, &e.Description, &e.UpdatedAt, &e.CreatedAt)
 		panicIf(err)
-		e.Html = htmlify(w, r, e.Description)
+		e.Html = htmlify(w, r, e.Description, e.ID)
 		e.Stars = loadStars(e.Keyword)
 		entries = append(entries, &e)
 	}
@@ -186,8 +184,8 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	// use cmap
 	{
-		r := glob.MustCompile("*" + keyword + "*")
-		glober.Store(keyword, &r)
+		// r := glob.MustCompile("*" + keyword + "*")
+		glober.Store(keyword)
 	}
 
 	_, err := db.Exec(`
@@ -292,7 +290,7 @@ func keywordByKeywordHandler(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
-	e.Html = htmlify(w, r, e.Description)
+	e.Html = htmlify(w, r, e.Description, e.ID)
 	e.Stars = loadStars(e.Keyword)
 
 	re.HTML(w, http.StatusOK, "keyword", struct {
@@ -339,39 +337,39 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // TODO: tuning
-func htmlify(w http.ResponseWriter, r *http.Request, content string) string {
+func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int) string {
 	if content == "" {
 		return ""
 	}
 
-	start := time.Now()
-
 	// ORDER BY CHARACTER_LENGTH(keyword) DESC
 	sorted := glober.LoadAllSortedWords()
-	// log.Printf("%v", sortedSlice)
+	// log.Printf("%v", sorted)
 
 	elapsed := time.Since(start)
 	log.Printf("Binomial took %s", elapsed)
 
 	kw2sha := make(map[string]string)
-	contentHash := fmt.Sprintf("%x", sha1.Sum([]byte(content)))
 
-	for _, tuple := range sorted {
+	for _, keyword := range *sorted {
 		var isMatch bool
 		var ok bool
-		key := tuple.keyword + contentHash
+		kw := *keyword
+		key := strconv.Itoa(eid) + kw
+
+		start := time.Now()
 
 		if isMatch, ok = syncMatchMap.Load(key); ok {
 			// log.Printf("CONTENTHASH CACHE HIT!")
 		} else {
-			isMatch = (*tuple.glob).Match(content)
+			isMatch = strings.Contains(content, kw)
 			syncMatchMap.Store(key, isMatch)
 		}
 
 		if isMatch {
 			// log.Printf("HIT the word: %v", tuple.keyword)
-			kw := tuple.keyword
-			kw2sha[kw] = "__" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
+			keywordHash := fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
+			kw2sha[kw] = "i_s_d" + keywordHash
 			content = strings.Replace(content, kw, kw2sha[kw], -1)
 		}
 	}
@@ -452,7 +450,7 @@ func initRegexp() {
 	glober = nil
 	syncMatchMap = nil
 
-	glober = NewSyncMap()
+	glober = NewSortedSet()
 	syncMatchMap = NewSyncMatchMap()
 
 	rows, err := db.Query(`
@@ -469,8 +467,7 @@ func initRegexp() {
 	rows.Close()
 
 	for _, entry := range entries {
-		r := glob.MustCompile("*" + entry.Keyword + "*")
-		glober.Store(entry.Keyword, &r)
+		glober.Store(entry.Keyword)
 	}
 }
 
