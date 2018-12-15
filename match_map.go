@@ -1,6 +1,11 @@
 package main
 
+// NOTE: { eid: { keyword: isMatch } }
+// のようなネストマップは逆にかなり低速
+
 import (
+	"strconv"
+
 	cmap "github.com/orcaman/concurrent-map"
 )
 
@@ -16,20 +21,20 @@ func NewSyncMatchMap() *SyncMatchMap {
 }
 
 // Store the instance
-func (s *SyncMatchMap) Store(contentHash string, value bool) {
-	s.r.Set(contentHash, value)
+func (s *SyncMatchMap) Store(entryID int, content string) {
+	s.r.Set(strconv.Itoa(entryID), content)
 }
 
 // Load the instance, return nil if not exists
-func (s *SyncMatchMap) Load(contentHash string) (bool, bool) {
-	t, ok := s.r.Get(contentHash)
+func (s *SyncMatchMap) Load(entryID int) (string, bool) {
+	t, ok := s.r.Get(strconv.Itoa(entryID))
 	if !ok {
-		return false, false
+		return "", false
 	}
-	return t.(bool), true
+	return t.(string), true
 }
 
 // Delete the instance
-func (s *SyncMatchMap) Delete(contentHash string) {
-	s.r.Remove(contentHash)
+func (s *SyncMatchMap) Delete(entryID int) {
+	s.r.Remove(strconv.Itoa(entryID))
 }

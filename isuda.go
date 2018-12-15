@@ -4,6 +4,8 @@
  * htmlify/ : Tupleを使うようにした (14400)
  * nginx    : favicon/ imgz/ を返却 (14400)
  * htmlify/ : sortedを引数で渡すようにした (41400)
+ * htmlify/ : 最長一致のアルゴリズムがバグっていたので修正 (45000)
+ * htmlify/ : とにかく最終結果をキャッシュして返す。不整合キにせず (78000)
  */
 
 package main
@@ -24,7 +26,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
@@ -347,56 +348,51 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 		return ""
 	}
 
-	start := time.Now()
+	// FIXME: keywordが追加・削除されたときにキャッシュ不整合が起こる
+	// キャッシュチェック
+	if result, ok := syncMatchMap.Load(eid); ok {
+		return result
+	}
 
-	kw2sha := make(map[string]string)
+	// start := time.Now()
 
-	for _, keyword := range *sorted {
-		var isMatch bool
-		var ok bool
-		kw := *keyword
-		key := strconv.Itoa(eid) + kw
-
-		if isMatch, ok = syncMatchMap.Load(key); ok {
-			// log.Printf("CONTENTHASH CACHE HIT!")
-		} else {
-			isMatch = strings.Contains(content, kw)
-			syncMatchMap.Store(key, isMatch)
-		}
-
-		if isMatch {
-			// log.Printf("HIT the word: %v", tuple.keyword)
-			keywordHash := fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
-			kw2sha[kw] = "i_s_d" + keywordHash
-			content = strings.Replace(content, kw, kw2sha[kw], -1)
+	// sortedされてるので、マッチした順番にcontentを消していく。copiedContent使うのが肝
+	var matched []*string
+	{
+		copiedContent := content
+		for _, keyword := range *sorted {
+			if strings.Contains(copiedContent, *keyword) {
+				matched = append(matched, keyword)
+				copiedContent = strings.Replace(copiedContent, *keyword, "", -1)
+			}
 		}
 	}
 
-	elapsed := time.Since(start)
-	log.Printf("Binomial took %s", elapsed)
+	// 課題：ハッシュ値が 110bek みたいなときに、keywordで「110」があるとHITしてしまう…
+	// 解決：もともとのコードは keyword --> hash --> link という2段階で置換していた。
+	// 　　　最長一致を実現するためっぽかったが、下記の２手順で keyword --> linkへ一気に置換
+	//　　　 １．事前に「最長一致を考慮済みのmatched-slice」を作る
+	// 　　　２．NewReplacer() で一気に置換する
+	var kwShaslice []string
+	for _, keyword := range matched {
+		kw := *keyword
 
-	for kw, hash := range kw2sha {
+		// link 生成
 		u, err := r.URL.Parse(baseUrl.String() + "/keyword/" + pathURIEscape(kw))
 		panicIf(err)
 		link := fmt.Sprintf("<a href=\"%s\">%s</a>", u, html.EscapeString(kw))
-		content = strings.Replace(content, hash, link, -1)
+
+		// NewReplacer用のslice
+		kwShaslice = append(kwShaslice, kw, link)
 	}
+	content = strings.NewReplacer(kwShaslice...).Replace(content)
 
-	// kw2sha := make(map[string]string)
-	// re := regexp.MustCompile("(" + strings.Join(keywords, "|") + ")")
-	// content = re.ReplaceAllStringFunc(content, func(kw string) string {
-	// 	kw2sha[kw] = "isuda_" + fmt.Sprintf("%x", sha1.Sum([]byte(kw)))
-	// 	return kw2sha[kw]
-	// })
-	// content = html.EscapeString(content)
-	// for kw, hash := range kw2sha {
-	// 	u, err := r.URL.Parse(baseUrl.String() + "/keyword/" + pathURIEscape(kw))
-	// 	panicIf(err)
-	// 	link := fmt.Sprintf("<a href=\"%s\">%s</a>", u, html.EscapeString(kw))
-	// 	content = strings.Replace(content, hash, link, -1)
-	// }
+	// elapsed := time.Since(start)
+	// log.Printf("Binomial took %s", elapsed)
 
-	return strings.Replace(content, "\n", "<br />\n", -1)
+	result := strings.Replace(content, "\n", "<br />\n", -1)
+	syncMatchMap.Store(eid, result)
+	return result
 }
 
 func loadStars(keyword string) []*Star {
@@ -448,9 +444,6 @@ func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
 }
 
 func initRegexp() {
-	glober = nil
-	syncMatchMap = nil
-
 	glober = NewSortedSet()
 	syncMatchMap = NewSyncMatchMap()
 
@@ -518,7 +511,6 @@ func main() {
 		isupamEndpoint = "http://localhost:5050"
 	}
 
-	// TODO: init regexp
 	{
 		initRegexp()
 	}
