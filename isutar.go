@@ -31,26 +31,14 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 func starsPostHandler(w http.ResponseWriter, r *http.Request) {
 	keyword := r.FormValue("keyword")
 
-	origin := os.Getenv("ISUDA_ORIGIN")
-	if origin == "" {
-		origin = "http://localhost:5000"
-	}
-
-	u, err := r.URL.Parse(fmt.Sprintf("%s/keyword/%s", origin, pathURIEscape(keyword)))
-	panicIf(err)
-
-	// log.Printf("### starsPostHandler ### %v", u.String())
-	resp, err := http.Get(u.String())
-	panicIf(err)
-
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	var tmp int
+	if err := db.QueryRow(`SELECT id FROM isuda.entry WHERE keyword = ?`, keyword).Scan(&tmp); err == sql.ErrNoRows {
 		notFound(w)
 		return
 	}
 
 	user := r.FormValue("user")
-	_, err = db.Exec(`INSERT INTO star (keyword, user_name, created_at) VALUES (?, ?, NOW())`, keyword, user)
+	_, err := db.Exec(`INSERT INTO star (keyword, user_name, created_at) VALUES (?, ?, NOW())`, keyword, user)
 	panicIf(err)
 
 	re.JSON(w, http.StatusOK, map[string]string{"result": "ok"})

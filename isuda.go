@@ -1,13 +1,17 @@
 /**
- * nginx で js/ css/ を返却 (???)
- * htmlify/ : use the cmap for keywords cache (7500 unstable)
- * htmlify/ : Tupleを使うようにした (14400)
- * nginx    : favicon/ imgz/ を返却 (14400)
- * htmlify/ : sortedを引数で渡すようにした (41400)
- * htmlify/ : 最長一致のアルゴリズムがバグっていたので修正 (45000)
- * htmlify/ : とにかく最終結果をキャッシュして返す。不整合キにせず (78000)
- * htmlify/ : starテーブル、entryテーブルにINDEX追加 (87000)
- * loadStars: isutar - isudaのHTTP通信が無駄なのでisudaに寄せる（97000）
+ * htmlify/               : use the cmap for keywords cache (7500 unstable)
+ * htmlify/               : Tupleを使うようにした (14400)
+ * nginx                  : favicon/ imgz/ を返却 (14400)
+ * THINK                  : regexpは遅いのでstringsパッケージで置き換えるのが必須
+ * htmlify/               : sortedを引数で渡すようにした (41400)
+ * htmlify/               : 最長一致のアルゴリズムがバグっていたので修正 (45000)
+ * htmlify/               : とにかく最終結果をキャッシュして返す。不整合キにせず (78000)
+ * THINK                  : 不整合があってもベンチマークは100%通るので無視して次へ。
+ * htmlify/               : starテーブル、entryテーブルにINDEX追加 (87000)
+ * THINK                  : strings.Contains() ばかり目にしていたが、CPUを浮かせられればよいのでは？
+ * loadStars              : isutar - isudaのHTTP通信が無駄なのでisudaに寄せる（97000）
+ * isutar.starsPostHandler: isutar - isudaのHTTP通信が無駄なのでisutarに寄せる（125000）
+ * topHandler/            : SELECT COUNT(*)をキャッシュで済ませる（131500）
  */
 
 package main
@@ -137,12 +141,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	var totalEntries int
-	row := db.QueryRow(`SELECT COUNT(*) FROM entry`)
-	err = row.Scan(&totalEntries)
-	if err != nil && err != sql.ErrNoRows {
-		panicIf(err)
-	}
+	totalEntries := glober.Count()
 
 	lastPage := int(math.Ceil(float64(totalEntries) / float64(perPage)))
 	pages := make([]int, 0, 10)
