@@ -12,6 +12,8 @@
  * loadStars              : isutar - isudaのHTTP通信が無駄なのでisudaに寄せる（97000）
  * isutar.starsPostHandler: isutar - isudaのHTTP通信が無駄なのでisutarに寄せる（125000）
  * topHandler/            : SELECT COUNT(*)をキャッシュで済ませる（131500）
+ * TODO: starsPostHandler : isudaに統合, nginx振り分け変更（単純移動だとスコア100kまで下がる）
+ * TODO: star table       : INSERT, SELECTのみなのでキャッシュに乗せる。
  */
 
 package main
@@ -32,7 +34,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
@@ -359,7 +360,7 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 	// sortedされてるので、マッチした順番にcontentを消していく。copiedContent使うのが肝
 	var matched []*string
 	{
-		start := time.Now()
+		// start := time.Now()
 		copiedContent := content
 		for _, keyword := range *sorted {
 			// TODO: tuning,
@@ -368,8 +369,8 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 				copiedContent = strings.Replace(copiedContent, *keyword, "", -1)
 			}
 		}
-		elapsed := time.Since(start)
-		log.Printf("Binomial took %s", elapsed)
+		// elapsed := time.Since(start)
+		// log.Printf("Binomial took %s", elapsed)
 	}
 
 	// 課題：ハッシュ値が 110bek みたいなときに、keywordで「110」があるとHITしてしまう…
