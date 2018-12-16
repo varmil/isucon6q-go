@@ -12,8 +12,10 @@
  * loadStars              : isutar - isudaのHTTP通信が無駄なのでisudaに寄せる（97000）
  * isutar.starsPostHandler: isutar - isudaのHTTP通信が無駄なのでisutarに寄せる（125000）
  * topHandler/            : SELECT COUNT(*)をキャッシュで済ませる（131500）
- * TODO: starsPostHandler : isudaに統合, nginx振り分け変更（単純移動だとスコア100kまで下がる）
- * TODO: star table       : INSERT, SELECTのみなのでキャッシュに乗せる。
+
+ * ABORT: starsPostHandler: isudaに統合, nginx振り分け変更（単純移動だとスコア100kまで下がる）
+ * ABORT: star table      : INSERT, SELECTのみなのでキャッシュに乗せる。
+ * THINK:                 : 結局スコア下がった…starsPostHandlerをisudaに移すより、完全別プロセスで処理したほうが詰まらないっぽい。
  */
 
 package main
