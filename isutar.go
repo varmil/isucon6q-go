@@ -28,27 +28,27 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 	re.JSON(w, http.StatusOK, map[string]string{"result": "ok"})
 }
 
-func starsHandler(w http.ResponseWriter, r *http.Request) {
-	keyword := r.FormValue("keyword")
-	rows, err := db.Query(`SELECT * FROM star WHERE keyword = ?`, keyword)
-	if err != nil && err != sql.ErrNoRows {
-		panicIf(err)
-		return
-	}
+// func starsHandler(w http.ResponseWriter, r *http.Request) {
+// 	keyword := r.FormValue("keyword")
+// 	rows, err := db.Query(`SELECT * FROM star WHERE keyword = ?`, keyword)
+// 	if err != nil && err != sql.ErrNoRows {
+// 		panicIf(err)
+// 		return
+// 	}
 
-	stars := make([]Star, 0, 10)
-	for rows.Next() {
-		s := Star{}
-		err := rows.Scan(&s.ID, &s.Keyword, &s.UserName, &s.CreatedAt)
-		panicIf(err)
-		stars = append(stars, s)
-	}
-	rows.Close()
+// 	stars := make([]Star, 0, 10)
+// 	for rows.Next() {
+// 		s := Star{}
+// 		err := rows.Scan(&s.ID, &s.Keyword, &s.UserName, &s.CreatedAt)
+// 		panicIf(err)
+// 		stars = append(stars, s)
+// 	}
+// 	rows.Close()
 
-	re.JSON(w, http.StatusOK, map[string][]Star{
-		"result": stars,
-	})
-}
+// 	re.JSON(w, http.StatusOK, map[string][]Star{
+// 		"result": stars,
+// 	})
+// }
 
 func starsPostHandler(w http.ResponseWriter, r *http.Request) {
 	keyword := r.FormValue("keyword")
@@ -121,7 +121,7 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/initialize", myHandler(initializeHandler))
 	s := r.PathPrefix("/stars").Subrouter()
-	s.Methods("GET").HandlerFunc(myHandler(starsHandler))
+	// s.Methods("GET").HandlerFunc(myHandler(starsHandler))
 	s.Methods("POST").HandlerFunc(myHandler(starsPostHandler))
 
 	// log.Fatal(http.ListenAndServe(":5001", handlers.LoggingHandler(os.Stdout, r)))

@@ -1,11 +1,13 @@
 /**
  * nginx で js/ css/ を返却 (???)
- * use the cmap for keywords cache (7500 unstable)
+ * htmlify/ : use the cmap for keywords cache (7500 unstable)
  * htmlify/ : Tupleを使うようにした (14400)
  * nginx    : favicon/ imgz/ を返却 (14400)
  * htmlify/ : sortedを引数で渡すようにした (41400)
  * htmlify/ : 最長一致のアルゴリズムがバグっていたので修正 (45000)
  * htmlify/ : とにかく最終結果をキャッシュして返す。不整合キにせず (78000)
+ * htmlify/ : starテーブル、entryテーブルにINDEX追加 (87000)
+ * loadStars: isutar - isudaのHTTP通信が無駄なのでisudaに寄せる（97000）
  */
 
 package main
@@ -26,6 +28,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
@@ -354,18 +357,20 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 		return result
 	}
 
-	// start := time.Now()
-
 	// sortedされてるので、マッチした順番にcontentを消していく。copiedContent使うのが肝
 	var matched []*string
 	{
+		start := time.Now()
 		copiedContent := content
 		for _, keyword := range *sorted {
+			// TODO: tuning,
 			if strings.Contains(copiedContent, *keyword) {
 				matched = append(matched, keyword)
 				copiedContent = strings.Replace(copiedContent, *keyword, "", -1)
 			}
 		}
+		elapsed := time.Since(start)
+		log.Printf("Binomial took %s", elapsed)
 	}
 
 	// 課題：ハッシュ値が 110bek みたいなときに、keywordで「110」があるとHITしてしまう…
@@ -387,27 +392,27 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 	}
 	content = strings.NewReplacer(kwShaslice...).Replace(content)
 
-	// elapsed := time.Since(start)
-	// log.Printf("Binomial took %s", elapsed)
-
 	result := strings.Replace(content, "\n", "<br />\n", -1)
 	syncMatchMap.Store(eid, result)
 	return result
 }
 
 func loadStars(keyword string) []*Star {
-	v := url.Values{}
-	v.Set("keyword", keyword)
-	resp, err := http.Get(fmt.Sprintf("%s/stars", isutarEndpoint) + "?" + v.Encode())
-	panicIf(err)
-	defer resp.Body.Close()
-
-	var data struct {
-		Result []*Star `json:result`
+	rows, err := db.Query(`SELECT * FROM isutar.star WHERE keyword = ?`, keyword)
+	if err != nil && err != sql.ErrNoRows {
+		panicIf(err)
 	}
-	err = json.NewDecoder(resp.Body).Decode(&data)
-	panicIf(err)
-	return data.Result
+
+	stars := make([]*Star, 0, 10)
+	for rows.Next() {
+		s := Star{}
+		err := rows.Scan(&s.ID, &s.Keyword, &s.UserName, &s.CreatedAt)
+		panicIf(err)
+		stars = append(stars, &s)
+	}
+	rows.Close()
+
+	return stars
 }
 
 func isSpamContents(content string) bool {
