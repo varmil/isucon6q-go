@@ -37,7 +37,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
@@ -197,7 +196,7 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 	// use cmap
 	{
 		sortedSet.Store(keyword, true)
-		syncMatchMap = NewSyncMatchMap() // TODO: tuning
+		// syncMatchMap = NewSyncMatchMap() // TODO: tuning
 	}
 
 	_, err := db.Exec(`
@@ -344,7 +343,7 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	// use cmap
 	{
 		sortedSet.Delete(keyword)
-		syncMatchMap = NewSyncMatchMap() // TODO: tuning
+		// syncMatchMap = NewSyncMatchMap() // TODO: tuning
 	}
 
 	_, err = db.Exec(`DELETE FROM entry WHERE keyword = ?`, keyword)
@@ -363,7 +362,7 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 		return result
 	}
 
-	start := time.Now()
+	// start := time.Now()
 
 	// 課題：ハッシュ値が 110bek みたいなときに、keywordで「110」があるとHITしてしまう…
 	// 解決：もともとのコードは keyword --> hash --> link という2段階で置換していた。
@@ -374,8 +373,8 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 	// 最長マッチで一気に置換してくれるっぽい、夢の産物。
 	content = sortedSet.reps.Replace(content)
 
-	elapsed := time.Since(start)
-	log.Printf("Binomial took %s", elapsed)
+	// elapsed := time.Since(start)
+	// log.Printf("Binomial took %s", elapsed)
 
 	result := strings.Replace(content, "\n", "<br />\n", -1)
 	syncMatchMap.Store(eid, result)
