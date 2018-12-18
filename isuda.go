@@ -16,6 +16,8 @@
  * ABORT: starsPostHandler: isudaに統合, nginx振り分け変更（単純移動だとスコア100kまで下がる）
  * ABORT: star table      : INSERT, SELECTのみなのでキャッシュに乗せる。
  * THINK:                 : 結局スコア下がった…starsPostHandlerをisudaに移すより、完全別プロセスで処理したほうが詰まらないっぽい。
+ * strings.NewReplacer()  : これ自体が重いのでキャッシュすると爆発的にスコアが上がる（183000）
+ * UpdateReplacer()       : fmt.Sprintf()やurl.Parse()が遅いので地味に改善（190000）
  */
 
 package main
@@ -27,7 +29,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"html/template"
 	"log"
 	"math"
@@ -36,6 +37,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Songmu/strrand"
 	_ "github.com/go-sql-driver/mysql"
@@ -63,7 +65,7 @@ var (
 
 	errInvalidUser = errors.New("Invalid User")
 
-	glober       *SortedSet
+	sortedSet    *SortedSet
 	syncMatchMap *SyncMatchMap
 )
 
@@ -132,7 +134,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entries := make([]*Entry, 0, 10)
-	sorted := glober.LoadAllSortedWords()
+	sorted := sortedSet.LoadAllSortedWords()
 
 	for rows.Next() {
 		e := Entry{}
@@ -144,7 +146,7 @@ func topHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
-	totalEntries := glober.Count()
+	totalEntries := sortedSet.Count()
 
 	lastPage := int(math.Ceil(float64(totalEntries) / float64(perPage)))
 	pages := make([]int, 0, 10)
@@ -194,8 +196,8 @@ func keywordPostHandler(w http.ResponseWriter, r *http.Request) {
 
 	// use cmap
 	{
-		// r := glob.MustCompile("*" + keyword + "*")
-		glober.Store(keyword)
+		sortedSet.Store(keyword, true)
+		syncMatchMap = NewSyncMatchMap() // TODO: tuning
 	}
 
 	_, err := db.Exec(`
@@ -300,7 +302,7 @@ func keywordByKeywordHandler(w http.ResponseWriter, r *http.Request) {
 		notFound(w)
 		return
 	}
-	sorted := glober.LoadAllSortedWords()
+	sorted := sortedSet.LoadAllSortedWords()
 	e.Html = htmlify(w, r, e.Description, e.ID, sorted)
 	e.Stars = loadStars(e.Keyword)
 
@@ -340,14 +342,16 @@ func keywordByKeywordDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// use cmap
-	glober.Delete(keyword)
+	{
+		sortedSet.Delete(keyword)
+		syncMatchMap = NewSyncMatchMap() // TODO: tuning
+	}
 
 	_, err = db.Exec(`DELETE FROM entry WHERE keyword = ?`, keyword)
 	panicIf(err)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// TODO: tuning
 func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, sorted *[]*string) string {
 	if content == "" {
 		return ""
@@ -359,40 +363,19 @@ func htmlify(w http.ResponseWriter, r *http.Request, content string, eid int, so
 		return result
 	}
 
-	// sortedされてるので、マッチした順番にcontentを消していく。copiedContent使うのが肝
-	var matched []*string
-	{
-		// start := time.Now()
-		copiedContent := content
-		for _, keyword := range *sorted {
-			// TODO: tuning,
-			if strings.Contains(copiedContent, *keyword) {
-				matched = append(matched, keyword)
-				copiedContent = strings.Replace(copiedContent, *keyword, "", -1)
-			}
-		}
-		// elapsed := time.Since(start)
-		// log.Printf("Binomial took %s", elapsed)
-	}
+	start := time.Now()
 
 	// 課題：ハッシュ値が 110bek みたいなときに、keywordで「110」があるとHITしてしまう…
 	// 解決：もともとのコードは keyword --> hash --> link という2段階で置換していた。
-	// 　　　最長一致を実現するためっぽかったが、下記の２手順で keyword --> linkへ一気に置換
-	//　　　 １．事前に「最長一致を考慮済みのmatched-slice」を作る
-	// 　　　２．NewReplacer() で一気に置換する
-	var kwShaslice []string
-	for _, keyword := range matched {
-		kw := *keyword
+	// 　　　最長一致を実現するためっぽかったが、下記手順で keyword --> linkへ一気に置換
+	// 　　　１．NewReplacer() で一気に置換する。事前キャッシュ
+	// 　　　２．ここではReplace()のみを呼び出す
 
-		// link 生成
-		u, err := r.URL.Parse(baseUrl.String() + "/keyword/" + pathURIEscape(kw))
-		panicIf(err)
-		link := fmt.Sprintf("<a href=\"%s\">%s</a>", u, html.EscapeString(kw))
+	// 最長マッチで一気に置換してくれるっぽい、夢の産物。
+	content = sortedSet.reps.Replace(content)
 
-		// NewReplacer用のslice
-		kwShaslice = append(kwShaslice, kw, link)
-	}
-	content = strings.NewReplacer(kwShaslice...).Replace(content)
+	elapsed := time.Since(start)
+	log.Printf("Binomial took %s", elapsed)
 
 	result := strings.Replace(content, "\n", "<br />\n", -1)
 	syncMatchMap.Store(eid, result)
@@ -451,7 +434,7 @@ func getSession(w http.ResponseWriter, r *http.Request) *sessions.Session {
 }
 
 func initRegexp() {
-	glober = NewSortedSet()
+	sortedSet = NewSortedSet()
 	syncMatchMap = NewSyncMatchMap()
 
 	rows, err := db.Query(`
@@ -467,8 +450,11 @@ func initRegexp() {
 	}
 	rows.Close()
 
-	for _, entry := range entries {
-		glober.Store(entry.Keyword)
+	{
+		for _, entry := range entries {
+			sortedSet.Store(entry.Keyword, false)
+		}
+		sortedSet.UpdateReplacer()
 	}
 }
 
